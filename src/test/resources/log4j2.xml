@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration packages="the.java.slack4j">
+	<Appenders>
+		<Slack name="SlackAppender" username="Logger" channel="Logs" webhookUrl="http://www.tanerdiler.com"/>
+	</Appenders>
+	<Loggers>
+		<Root level="INFO">
+			<AppenderRef ref="SlackAppender" />
+		</Root>
+	</Loggers>
+</Configuration>

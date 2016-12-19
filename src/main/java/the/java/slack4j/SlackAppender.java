@@ -12,6 +12,7 @@ import org.apache.logging.log4j.core.layout.PatternLayout;
 
 import java.io.Serializable;
 import java.net.URL;
+import java.util.LinkedList;
 
 /**
  * Created by taner on 30.11.2016.
@@ -42,6 +43,7 @@ public class SlackAppender extends AbstractAppender
                                                    @PluginAttribute("channel") String channel,
                                                    @PluginAttribute(value = "username", defaultString = "Log4j") String username,
                                                    @PluginAttribute("webhookUrl") URL webhookUrl,
+                                                   @PluginAttribute("fieldProviderClass", defaultString = "the.java.slack4j.DefaultFieldProvider") String fieldProviderClassName,
                                                    @PluginElement("Layout") Layout<? extends Serializable> layout,
                                                    @PluginElement("Filters") final Filter filter)
     {
@@ -50,14 +52,30 @@ public class SlackAppender extends AbstractAppender
             layout = PatternLayout.createDefaultLayout();
         }
 
-        SlackAppender slackAppender = new SlackAppender(name, channel, username, webhookUrl, layout, filter);
+        SlackAppender slackAppender = null;
+        try
+        {
+            FieldProvider fieldProvider = (FieldProvider) SlackAppender.class.getClassLoader().loadClass(fieldProviderClassName).newInstance();
+            slackAppender = new SlackAppender(name, channel, username, webhookUrl, layout, filter);
+        }
+        catch (ClassNotFoundException e)
+        {
+            e.printStackTrace();
+        } catch (IllegalAccessException e)
+        {
+            e.printStackTrace();
+        } catch (InstantiationException e)
+        {
+            e.printStackTrace();
+        }
 
         return slackAppender;
     }
 
     public void append(LogEvent logEvent)
     {
-        System.out.println(logEvent.getMessage());
+        SlackMessage message = SlackMessage.wrap(logEvent);
+        SlackApi.to(webhookUrl).connect().send(message).close();
     }
 
     public String getChannel()

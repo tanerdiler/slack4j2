@@ -1,5 +1,7 @@
 package the.java.slack4j;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.core.Filter;
 import org.apache.logging.log4j.core.Layout;
 import org.apache.logging.log4j.core.LogEvent;
@@ -14,6 +16,8 @@ import java.io.Serializable;
 import java.net.URL;
 import java.util.LinkedList;
 
+import static the.java.slack4j.SlackApi.to;
+
 /**
  * Created by taner on 30.11.2016.
  * <p>
@@ -23,12 +27,14 @@ import java.util.LinkedList;
 @Plugin(name = "Slack", category = "Core", elementType = "appender", printObject = true)
 public class SlackAppender extends AbstractAppender
 {
+    private static final Logger LOGGER = LogManager.getLogger(SlackAppender.class);
 
     private final String channel;
     private final String username;
     private final URL webhookUrl;
+    private final FieldProvider fieldProvider;
 
-    protected SlackAppender(String name, String channel, String username, URL webhookUrl,
+    protected SlackAppender(String name, String channel, String username, URL webhookUrl, FieldProvider fieldProvider,
                                 Layout<? extends Serializable> layout, Filter filter)
     {
         super(name, filter, layout, true);
@@ -36,6 +42,7 @@ public class SlackAppender extends AbstractAppender
         this.channel = channel;
         this.username = username;
         this.webhookUrl = webhookUrl;
+        this.fieldProvider = fieldProvider;
     }
 
     @PluginFactory
@@ -43,7 +50,7 @@ public class SlackAppender extends AbstractAppender
                                                    @PluginAttribute("channel") String channel,
                                                    @PluginAttribute(value = "username", defaultString = "Log4j") String username,
                                                    @PluginAttribute("webhookUrl") URL webhookUrl,
-                                                   @PluginAttribute("fieldProviderClass", defaultString = "the.java.slack4j.DefaultFieldProvider") String fieldProviderClassName,
+                                                   @PluginAttribute(value = "fieldProviderClass", defaultString = "the.java.slack4j.DefaultFieldProvider") String fieldProviderClassName,
                                                    @PluginElement("Layout") Layout<? extends Serializable> layout,
                                                    @PluginElement("Filters") final Filter filter)
     {
@@ -53,29 +60,51 @@ public class SlackAppender extends AbstractAppender
         }
 
         SlackAppender slackAppender = null;
+
         try
         {
-            FieldProvider fieldProvider = (FieldProvider) SlackAppender.class.getClassLoader().loadClass(fieldProviderClassName).newInstance();
-            slackAppender = new SlackAppender(name, channel, username, webhookUrl, layout, filter);
+            FieldProvider fieldProvider = newInstanceOfFieldProvider(fieldProviderClassName);
+            slackAppender = new SlackAppender(name, channel, username, webhookUrl, fieldProvider, layout, filter);
         }
-        catch (ClassNotFoundException e)
+        catch (Slack4jConfigurationException e)
         {
-            e.printStackTrace();
-        } catch (IllegalAccessException e)
-        {
-            e.printStackTrace();
-        } catch (InstantiationException e)
-        {
-            e.printStackTrace();
+            LOGGER.error(e.getMessage(), e);
         }
 
         return slackAppender;
     }
 
+    private static FieldProvider newInstanceOfFieldProvider(String fieldProviderClassName)
+    throws Slack4jConfigurationException
+    {
+        FieldProvider fieldProvider = null;
+        try
+        {
+            fieldProvider = (FieldProvider) SlackAppender.class.getClassLoader().loadClass(fieldProviderClassName).newInstance();
+        }
+        catch (ClassNotFoundException | IllegalAccessException | InstantiationException e)
+        {
+            throw new Slack4jConfigurationException("FieldProvider instance has not been create from specified class{"+fieldProviderClassName+"}. SlackAppender will not work anymore.", e);
+        }
+        return fieldProvider;
+    }
+
     public void append(LogEvent logEvent)
     {
-        SlackMessage message = SlackMessage.wrap(logEvent);
-        SlackApi.to(webhookUrl).connect().send(message).close();
+        SlackMessage message = SlackMessage.wrap(logEvent, fieldProvider.getFields());
+
+        try(SlackApi api = SlackApi.to(webhookUrl))
+        {
+            api.connect().send(message).close();
+        }
+        catch (SlackConnectionException e)
+        {
+            LOGGER.error("The message specified below has not been sent to Slack.\n"+message.toJson(), e);
+        }
+        catch (Exception e)
+        {
+            LOGGER.error("Unknown exception has been thrown.", e);
+        }
     }
 
     public String getChannel()
@@ -91,5 +120,10 @@ public class SlackAppender extends AbstractAppender
     public URL getWebhookUrl()
     {
         return webhookUrl;
+    }
+
+    public FieldProvider getFieldProvider()
+    {
+        return fieldProvider;
     }
 }
